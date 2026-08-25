@@ -797,6 +797,22 @@ function BenDecryptInText(text)
     if changed then
         return out
     end
+
+    local stripped = text:gsub("`.", "")
+    if stripped ~= text and stripped:find(BEN_ENC_MARK, 1, true) then
+        local out2 = stripped:gsub(BEN_ENC_MARK .. "[a-z0-5]+", function(tok)
+            local dec = BenDecryptChat(tok)
+            if dec then
+                changed = true
+                return "`6[EN] `w" .. dec
+            end
+            return tok
+        end)
+        if changed then
+            return out2
+        end
+    end
+
     return nil
 end
 
@@ -1989,7 +2005,7 @@ function HandleBenMenuTranslate(str)
     return true
 end
 
-benIncomingTranslateMode = benIncomingTranslateMode or "auto"
+benIncomingTranslateMode = benIncomingTranslateMode or "off"
 
 function ShowTranslateMenu()
     local incomingStatus = "`4[DISABLED]"
@@ -12323,38 +12339,46 @@ local localNameSafe = (GetLocal and GetLocal() and GetLocal().name) or "Unknown"
 Webhuk(injek, "User Log", "", "Growid: ".. Filter(localNameSafe) .. " use SC Proxy")
 
 function onvariant(var)
-if "OnTalkBubble" == var[0] and type(var[2]) == "string" and not var[2]:find("[EN]", 1, true) then
-    local benEncDec = BenDecryptInText(var[2])
-    if benEncDec then
-        local benEncNet = tonumber(var[1]) or 0
-        local benEncName = "Player"
-        if GetPlayerList then
-            local benEncList = GetPlayerList()
-            if benEncList then
-                for _, benEncP in pairs(benEncList) do
-                    if (benEncP.netID and benEncP.netID == benEncNet) or (benEncP.netid and benEncP.netid == benEncNet) then
-                        benEncName = benEncP.name or benEncName
-                        break
-                    end
+if ("OnTalkBubble" == var[0] or "OnConsoleMessage" == var[0]) then
+    local benEncSlot = ("OnTalkBubble" == var[0]) and 2 or 1
+    local benEncRaw = var[benEncSlot]
+    if type(benEncRaw) == "string" and not benEncRaw:find("[EN]", 1, true) and benEncRaw:find(BEN_ENC_MARK, 1, true) then
+        local benEncOk, benEncDec = pcall(BenDecryptInText, benEncRaw)
+        if benEncOk and benEncDec then
+            local benEncShown = false
+
+            pcall(function()
+                if LogToConsole then
+                    LogToConsole("`b[`cBen `#x `cRich`b] " .. benEncDec)
+                    benEncShown = true
                 end
+            end)
+
+            if not benEncShown then
+                pcall(function()
+                    if TextOverlay then
+                        TextOverlay(benEncDec)
+                        benEncShown = true
+                    end
+                end)
+            end
+
+            if benEncSlot == 2 then
+                pcall(function()
+                    SendVariantList({
+                        [0] = "OnTalkBubble",
+                        [1] = tonumber(var[1]) or 0,
+                        [2] = benEncDec,
+                        [3] = tonumber(var[3] or 0)
+                    })
+                    benEncShown = true
+                end)
+            end
+
+            if benEncShown then
+                return true
             end
         end
-        LogToConsole("`b[`cBen `#x `cRich`b] `6[EN] `3" .. Filter(benEncName) .. "`0: `w" .. benEncDec:gsub("`6%[EN%] `w", ""))
-        SendVariantList({
-            [0] = "OnTalkBubble",
-            [1] = benEncNet,
-            [2] = benEncDec,
-            [3] = tonumber(var[3] or 0)
-        })
-        return true
-    end
-end
-
-if "OnConsoleMessage" == var[0] and type(var[1]) == "string" and not var[1]:find("[EN]", 1, true) then
-    local benEncDec = BenDecryptInText(var[1])
-    if benEncDec then
-        LogToConsole(benEncDec)
-        return true
     end
 end
 
