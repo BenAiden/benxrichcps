@@ -24,11 +24,11 @@ opening = "\nadd_label_with_icon|big|`2BEN x RICH PROXY BOTHAX V1               
 "\nadd_textbox|`2Use /p or /proxy, or tap the Social Portal|"..
 "\nadd_spacer|small|"..
 "\nadd_label_with_icon|small|`^Latest Update:|left|7074|"..
-"\nadd_textbox|`6 [NEW] Vend & DigiVend Scanner UI w/ Price Sort (/scan)|"..
-"\nadd_textbox|`2 [NEW] Magplant Stock Scanner UI Dialog (/scanmag)|"..
-"\nadd_textbox|`2 [NEW] Auto Farm V1 & V2 Hub with Mag Teleport (/farm)|"..
+"\nadd_textbox|`6 [NEW] Vending Machine Scanner UI Dialog & Sort (/scan)|"..
+"\nadd_textbox|`2 [NEW] Encrypted Chat: only script users can read it (/en hello)|"..
+"\nadd_textbox|`2 [NEW] Country Flag Changer: 30+ Flags & Custom (/flag)|"..
 "\nadd_textbox|`2 [NEW] Float Manager: Mag / Vend / Trash / Collect (/float)|"..
-"\nadd_textbox|`2 [NEW] Encrypted Chat: only script users can read it (/en)|"..
+"\nadd_textbox|`2 [NEW] Live Bidirectional Translator (ID <-> EN) (/translate)|"..
 "\nadd_spacer|small|"..
 "\nend_dialog|cl|Enjoy|"
 
