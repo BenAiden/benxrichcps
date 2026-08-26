@@ -8989,8 +8989,8 @@ local function ExtractVendData(tile)
                 end
             end
 
-            if itemId <= 0 and extra.owner and tonumber(extra.owner) and tonumber(extra.owner) > 0 and tonumber(extra.owner) < 25000 then
-                local testId = tonumber(extra.owner)
+            if itemId <= 0 and extra.lastupdate and tonumber(extra.lastupdate) and tonumber(extra.lastupdate) > 0 and tonumber(extra.lastupdate) < 25000 then
+                local testId = tonumber(extra.lastupdate)
                 local itemObj = (GetItemInfo and GetItemInfo(testId)) or nil
                 if itemObj and itemObj.name and itemObj.name ~= "" then
                     itemId = testId
@@ -9002,8 +9002,8 @@ local function ExtractVendData(tile)
                 stockNum = tonumber(extra.fruitcount)
             end
 
-            if priceNum == 0 and extra.lastupdate and tonumber(extra.lastupdate) and tonumber(extra.lastupdate) ~= 0 then
-                priceNum = tonumber(extra.lastupdate)
+            if priceNum == 0 and extra.owner and tonumber(extra.owner) and tonumber(extra.owner) ~= 0 then
+                priceNum = tonumber(extra.owner)
             end
             if priceNum == 0 and extra.volume and tonumber(extra.volume) and tonumber(extra.volume) ~= 0 then
                 priceNum = tonumber(extra.volume)
@@ -14107,6 +14107,7 @@ end
 
 SendPacket(2, "action|input\n|text|`4[`4Inject Proxy `wBy `#Ben `cx `2Rich`4]")
 SendVariantList({[0] = "OnDialogRequest", [1] = opening })
+
 
 
 
