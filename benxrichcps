@@ -8805,10 +8805,532 @@ function ShowMagScanResultDialog(totalMags, elapsed)
         table.insert(d, "add_textbox|`7No items found or all scanned Magplants were empty.|")
     else
         for _, data in ipairs(sortedStock) do
+            table.insert(d, "add_label_with_icon|small|`w[ `2" .. intToString(data.stock) .. " `w] `#" .. tostring(data.name) .. "|left|" .. tostring(data.id) .. "|")
+        end
+    end
+
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "add_button|btn_export_mag_stock|`5[ Log All Stock to Chat Console ]`|noflags|0|0|")
+    table.insert(d, "text_scaling_string|jjjjjjjjjjjjjjjjjjjjjjjjjj|")
+    table.insert(d, "add_button_with_icon|open_mag_scanner|`9Scanner|staticBlueFrame|5638||")
+    table.insert(d, "add_button_with_icon|open_farm_hub|`6Farm Hub|staticYellowFrame|1436||")
+    table.insert(d, "add_button_with_icon|lonkback|`6Proxy Menu|staticYellowFrame|1436||")
+    table.insert(d, "add_button_with_icon||END_LIST|noflags|0||")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "end_dialog|mag_scan_result|Close||")
+
+    SendVariantList({
+        [0] = "OnDialogRequest",
+        [1] = table.concat(d, "\n")
+    })
+end
+
+-- ==========================================================
+-- WORLD VENDING MACHINE SCANNER MODULE (VEND 2978 & DIGIVEND 9268)
+-- ==========================================================
+
+vendScanLastResults = {}
+vendScanLastQuery = ""
+vendScanPage = 1
+VEND_SCAN_PER_PAGE = 50
+
+function GetItemNameById(id)
+    id = tonumber(id) or 0
+    if id <= 0 then return "Empty / No Item" end
+    local getter = rawget(_G, "GetItemByIDSafe") or rawget(_G, "GetItemInfo") or rawget(_G, "getItemInfo")
+    if type(getter) == "function" then
+        local ok, info = pcall(getter, id)
+        if ok and info then
+            if type(info) == "table" and info.name and info.name ~= "" then
+                return tostring(info.name)
+            elseif type(info) == "string" and info ~= "" then
+                return info
+            end
+        end
+    end
+    return "Item #" .. tostring(id)
+end
+
+local function CleanVendItemName(rawStr)
+    if not rawStr or rawStr == "" then return "" end
+    local s = rawStr:gsub("`.", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if s:lower():find("out of order") then
+        return "Out of Order"
+    end
+    s = s:gsub("%s+[Dd][Ii][Gg][Ii][Vv][Ee][Nn][Dd]%s+[Mm][Aa][Cc][Hh][Ii][Nn][Ee]", "")
+    s = s:gsub("%s+[Vv][Ee][Nn][Dd][Ii][Nn][Gg]%s+[Mm][Aa][Cc][Hh][Ii][Nn][Ee]", "")
+    s = s:gsub("%s+[Vv][Ee][Nn][Dd]%s+[Mm][Aa][Cc][Hh][Ii][Nn][Ee]", "")
+    s = s:gsub("%s+[Dd][Ii][Gg][Ii][Vv][Ee][Nn][Dd]", "")
+    s = s:gsub("%s+[Vv][Ee][Nn][Dd][Ii][Nn][Gg]", "")
+    s = s:gsub("%s+[Mm][Aa][Cc][Hh][Ii][Nn][Ee]", "")
+    s = s:gsub("^%s+", ""):gsub("%s+$", "")
+    return s
+end
+
+local function ResolveItemId(name)
+    if not name or name == "" or name == "Out of Order" or name == "Empty / No Item" then return 0, name end
+    local nameGetter = rawget(_G, "GetItemByName") or rawget(_G, "GetItemInfo") or rawget(_G, "getItemInfo")
+    if type(nameGetter) == "function" then
+        local ok, info = pcall(nameGetter, name)
+        if ok and info and type(info) == "table" and info.id and tonumber(info.id) > 0 then
+            return tonumber(info.id), (info.name or name)
+        end
+        ok, info = pcall(nameGetter, name:upper())
+        if ok and info and type(info) == "table" and info.id and tonumber(info.id) > 0 then
+            return tonumber(info.id), (info.name or name)
+        end
+        ok, info = pcall(nameGetter, name:lower())
+        if ok and info and type(info) == "table" and info.id and tonumber(info.id) > 0 then
+            return tonumber(info.id), (info.name or name)
+        end
+    end
+
+    local partialGetter = rawget(_G, "GetItemsByPartialName") or rawget(_G, "getItemsByPartialName")
+    if type(partialGetter) == "function" then
+        local ok, list = pcall(partialGetter, name)
+        if ok and type(list) == "table" and #list > 0 and list[1] and list[1].id and tonumber(list[1].id) > 0 then
+            return tonumber(list[1].id), (list[1].name or name)
+        end
+    end
+    return 0, name
+end
+
+local function ParseVendPriceString(pStr, fallbackNum, fallbackBuy)
+    if pStr and pStr ~= "" then
+        local s = pStr:gsub("`.", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if s ~= "" then
+            local numWl = s:match("(%d+)%s+[Ww]orld%s+[Ll]ocks?%s+each") or s:match("(%d+)%s+[Ww][Ll]s?%s+each") or s:match("(%d+)%s+[Ww]orld%s+[Ll]ocks?") or s:match("(%d+)%s+[Ww][Ll]")
+            if numWl then return numWl .. " WL" end
+            local numDl = s:match("(%d+)%s+[Dd]iamond%s+[Ll]ocks?%s+each") or s:match("(%d+)%s+[Dd][Ll]s?%s+each") or s:match("(%d+)%s+[Dd]iamond%s+[Ll]ocks?") or s:match("(%d+)%s+[Dd][Ll]")
+            if numDl then return numDl .. " DL" end
+            local numBgl = s:match("(%d+)%s+[Bb]lue%s+[Gg]em%s+[Ll]ocks?%s+each") or s:match("(%d+)%s+[Bb][Gg][Ll]s?%s+each")
+            if numBgl then return numBgl .. " BGL" end
+            local perWl = s:match("(%d+)%s+[Pp]er%s+1%s+[Ww]orld%s+[Ll]ock") or s:match("(%d+)%s+for%s+1%s+[Ww]orld%s+[Ll]ock") or s:match("(%d+)/1%s+[Ww][Ll]")
+            if perWl then return perWl .. "/1 WL" end
+            local perDl = s:match("(%d+)%s+[Pp]er%s+1%s+[Dd]iamond%s+[Ll]ock") or s:match("(%d+)%s+for%s+1%s+[Dd]iamond%s+[Ll]ock") or s:match("(%d+)/1%s+[Dd][Ll]")
+            if perDl then return perDl .. "/1 DL" end
+            return s
+        end
+    end
+
+    fallbackNum = tonumber(fallbackNum) or 0
+    fallbackBuy = tonumber(fallbackBuy) or 1
+    if fallbackNum > 0 then
+        if fallbackBuy > 1 then
+            return tostring(fallbackBuy) .. " for " .. tostring(fallbackNum) .. " WL"
+        else
+            return tostring(fallbackNum) .. " WL"
+        end
+    elseif fallbackNum < 0 then
+        return tostring(math.abs(fallbackNum)) .. "/1 WL"
+    else
+        return "Not Set"
+    end
+end
+
+local function ExtractVendData(tile)
+    if not tile then return nil end
+    local fg = tonumber(tile.fg or tile.id or 0) or 0
+    if fg ~= 2978 and fg ~= 9268 and fg ~= 5638 and fg ~= 11072 and fg ~= 8486 then return nil end
+
+    local x = tonumber(tile.x) or 0
+    local y = tonumber(tile.y) or 0
+    local extra = (type(tile.extra) == "table" or type(tile.extra) == "userdata") and tile.extra or nil
+    if not extra and type(tile.extra_data) == "table" then
+        extra = tile.extra_data
+    end
+
+    local vendType = (fg == 9268) and "DigiVend" or (fg == 5638) and "Magplant" or (fg == 11072) and "UT" or (fg == 8486) and "Gaia" or "Vending"
+    local itemId = 0
+    local itemName = ""
+    local priceNum = 0
+    local stockNum = 0
+    local buyCount = 1
+    local priceStr = ""
+    local isOutOfOrder = false
+
+    local rawLabel1 = ""
+    local rawLabel2 = ""
+    local rawLabel3 = ""
+
+    if extra then
+        pcall(function()
+            rawLabel1 = tostring(extra.label or "")
+            rawLabel2 = tostring(extra.label2 or "")
+            rawLabel3 = tostring(extra.label3 or "")
+        end)
+
+        pcall(function()
+            if extra.item and tonumber(extra.item) then itemId = tonumber(extra.item) end
+            if extra.itemId and tonumber(extra.itemId) then itemId = tonumber(extra.itemId) end
+            if extra.vend_item and tonumber(extra.vend_item) then itemId = tonumber(extra.vend_item) end
+            if extra.price and tonumber(extra.price) then priceNum = tonumber(extra.price) end
+            if extra.count and tonumber(extra.count) then stockNum = tonumber(extra.count) end
+            if extra.stock and tonumber(extra.stock) then stockNum = tonumber(extra.stock) end
+        end)
+
+        -- Bothax TileExtra union fields
+        pcall(function()
+            if itemId <= 0 and extra.alttype and tonumber(extra.alttype) and tonumber(extra.alttype) > 0 and tonumber(extra.alttype) < 25000 then
+                local testId = tonumber(extra.alttype)
+                local itemObj = (GetItemInfo and GetItemInfo(testId)) or nil
+                if itemObj and itemObj.name and itemObj.name ~= "" then
+                    itemId = testId
+                    itemName = tostring(itemObj.name)
+                end
+            end
+
+            if itemId <= 0 and extra.growth and tonumber(extra.growth) and tonumber(extra.growth) > 0 and tonumber(extra.growth) < 25000 then
+                local testId = tonumber(extra.growth)
+                local itemObj = (GetItemInfo and GetItemInfo(testId)) or nil
+                if itemObj and itemObj.name and itemObj.name ~= "" then
+                    itemId = testId
+                    itemName = tostring(itemObj.name)
+                end
+            end
+
+            if itemId <= 0 and extra.lastupdate and tonumber(extra.lastupdate) and tonumber(extra.lastupdate) > 0 and tonumber(extra.lastupdate) < 25000 then
+                local testId = tonumber(extra.lastupdate)
+                local itemObj = (GetItemInfo and GetItemInfo(testId)) or nil
+                if itemObj and itemObj.name and itemObj.name ~= "" then
+                    itemId = testId
+                    itemName = tostring(itemObj.name)
+                end
+            end
+
+            if stockNum <= 0 and extra.fruitcount and tonumber(extra.fruitcount) then
+                stockNum = tonumber(extra.fruitcount)
+            end
+
+            if priceNum == 0 and extra.owner and tonumber(extra.owner) and tonumber(extra.owner) ~= 0 then
+                priceNum = tonumber(extra.owner)
+            end
+            if priceNum == 0 and extra.volume and tonumber(extra.volume) and tonumber(extra.volume) ~= 0 then
+                priceNum = tonumber(extra.volume)
+            end
+        end)
+    end
+
+    pcall(function()
+        if itemId <= 0 and tile.item and tonumber(tile.item) then itemId = tonumber(tile.item) end
+        if itemId <= 0 and tile.itemId and tonumber(tile.itemId) then itemId = tonumber(tile.itemId) end
+        if priceNum == 0 and tile.price and tonumber(tile.price) then priceNum = tonumber(tile.price) end
+        if stockNum <= 0 and tile.count and tonumber(tile.count) then stockNum = tonumber(tile.count) end
+    end)
+
+    -- Check if marked out of order
+    if rawLabel1:lower():find("out of order") or rawLabel2:lower():find("out of order") or rawLabel3:lower():find("out of order") then
+        isOutOfOrder = true
+    end
+
+    local cleanL1 = CleanVendItemName(rawLabel1)
+    if cleanL1 ~= "" and cleanL1 ~= "Out of Order" and not isOutOfOrder then
+        if itemId <= 0 then
+            local idRes, nameRes = ResolveItemId(cleanL1)
+            if idRes > 0 then
+                itemId = idRes
+                itemName = nameRes
+            else
+                itemName = cleanL1
+            end
+        elseif itemName == "" then
+            itemName = cleanL1
+        end
+    end
+
+    if itemId > 0 then
+        local itemObj = (GetItemByIDSafe and GetItemByIDSafe(itemId)) or (GetItemInfo and GetItemInfo(itemId))
+        if itemObj and itemObj.name and itemObj.name ~= "" then
+            itemName = tostring(itemObj.name)
+        elseif itemName == "" then
+            itemName = "Item #" .. tostring(itemId)
+        end
+    end
+
+    if itemName == "" then
+        if isOutOfOrder then
+            itemName = "Out of Order"
+        elseif itemId > 0 then
+            itemName = "Item #" .. tostring(itemId)
+        else
+            itemName = "Empty Machine"
+        end
+    end
+
+    if isOutOfOrder then
+        priceStr = "Out of Order"
+    else
+        priceStr = ParseVendPriceString(rawLabel2, priceNum, buyCount)
+    end
+
+    if stockNum <= 0 and not isOutOfOrder then
+        local sMatch = rawLabel3:match("(%d+)") or rawLabel2:match("(%d+)%s+[Ii]tems?%s+left") or rawLabel1:match("(%d+)%s+[Ii]tems?%s+left")
+        if sMatch then
+            stockNum = tonumber(sMatch) or 0
+        end
+    end
+
+    return {
+        fg = fg,
+        x = x,
+        y = y,
+        itemId = itemId,
+        itemName = itemName,
+        rawLabel1 = rawLabel1:gsub("`.", ""),
+        rawLabel2 = rawLabel2:gsub("`.", ""),
+        rawLabel3 = rawLabel3:gsub("`.", ""),
+        priceStr = priceStr,
+        price = priceNum,
+        stock = stockNum,
+        buyCount = buyCount,
+        isOutOfOrder = isOutOfOrder,
+        vendType = vendType,
+        extra = extra
+    }
+end
+
+function FindAllVendingMachinesInWorld()
+    local vends = {}
+    local worldX = 99
+    local worldY = 59
+    local wInfo = GetWorld and GetWorld()
+    if wInfo and wInfo.width and wInfo.height then
+        worldX = wInfo.width - 1
+        worldY = wInfo.height - 1
+    elseif GetTile and GetTile(199, 199) then
+        worldX = 199
+        worldY = 199
+    end
+
+    local tiles = (GetTiles and GetTiles()) or {}
+    local hasTiles = false
+    if type(tiles) == "table" then
+        for _, tile in pairs(tiles) do
+            if tile then
+                hasTiles = true
+                local fg = tonumber(tile.fg or tile.id or 0) or 0
+                if fg == 2978 or fg == 9268 or fg == 5638 or fg == 11072 or fg == 8486 then
+                    local fullTile = tile
+                    if type(GetTile) == "function" and not tile.extra then
+                        fullTile = GetTile(tile.x, tile.y) or tile
+                    end
+                    local vData = ExtractVendData(fullTile)
+                    if vData then
+                        table.insert(vends, vData)
+                    end
+                end
+            end
+        end
+    end
+
+    if not hasTiles and type(GetTile) == "function" then
+        for y = 0, worldY do
+            for x = 0, worldX do
+                local tile = GetTile(x, y)
+                local vData = ExtractVendData(tile)
+                if vData then
+                    table.insert(vends, vData)
+                end
+            end
+        end
+    end
+
+    table.sort(vends, function(a, b)
+        if a.y == b.y then
+            return a.x < b.x
+        end
+        return a.y < b.y
+    end)
+    return vends
+end
+
+function SearchVendingMachines(query)
+    local allVends = FindAllVendingMachinesInWorld()
+    query = tostring(query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local isMatchAll = (query == "" or query == "all" or query == "*")
+    local queryLower = query:lower()
+    local queryNum = tonumber(query)
+
+    local matchedIdLookup = {}
+    if queryNum then
+        matchedIdLookup[queryNum] = true
+    end
+    if query ~= "" and not isMatchAll then
+        local partialGetter = rawget(_G, "GetItemsByPartialName") or rawget(_G, "getItemsByPartialName")
+        if type(partialGetter) == "function" then
+            local ok, partialList = pcall(partialGetter, query)
+            if ok and type(partialList) == "table" then
+                for _, itm in pairs(partialList) do
+                    if itm and itm.id then
+                        matchedIdLookup[tonumber(itm.id)] = true
+                    end
+                end
+            end
+        end
+    end
+
+    local matches = {}
+    for _, v in ipairs(allVends) do
+        local isMatch = false
+        if isMatchAll then
+            isMatch = true
+        elseif v.itemId > 0 and matchedIdLookup[v.itemId] then
+            isMatch = true
+        elseif queryNum and (v.itemId == queryNum or v.x == queryNum or v.y == queryNum or v.price == queryNum or v.stock == queryNum) then
+            isMatch = true
+        elseif v.itemName:lower():find(queryLower, 1, true) then
+            isMatch = true
+        elseif v.rawLabel1:lower():find(queryLower, 1, true) then
+            isMatch = true
+        elseif v.rawLabel2:lower():find(queryLower, 1, true) then
+            isMatch = true
+        elseif v.rawLabel3:lower():find(queryLower, 1, true) then
+            isMatch = true
+        elseif v.priceStr:lower():find(queryLower, 1, true) then
+            isMatch = true
+        elseif v.vendType:lower():find(queryLower, 1, true) then
+            isMatch = true
+        end
+
+        if isMatch then
+            table.insert(matches, v)
+        end
+    end
+
+    vendScanLastResults = matches
+    vendScanLastQuery = query
+    vendScanPage = 1
+    return matches, #allVends
+end
+
+function DumpNearestVendDebug()
+    if GetWorld() == nil then
+        TextOverlay("`4[DEBUG] Enter a world first!")
+        return
+    end
+
+    local curX, curY = GetLocalTile()
+    local allVends = FindAllVendingMachinesInWorld()
+    if #allVends == 0 then
+        LogToConsole("`b[`cBen `#x `9Rich `6DEBUG`b] `4No Vending Machines found in this world!")
+        TextOverlay("`4[DEBUG] No vending machines found in world!")
+        return
+    end
+
+    local nearest = nil
+    local minDist = 999999
+    for _, v in ipairs(allVends) do
+        local dist = math.abs(curX - v.x) + math.abs(curY - v.y)
+        if dist < minDist then
+            minDist = dist
+            nearest = v
+        end
+    end
+
+    if not nearest then return end
+
+    LogToConsole("`b[`cBen `#x `9Rich `6DEBUG`b] `2=== NEAREST VEND (Distance: " .. minDist .. " tiles) ===")
+    LogToConsole("`9Pos: `2(" .. nearest.x .. ", " .. nearest.y .. ") `7- `9FG: `#" .. nearest.fg .. " `7[" .. nearest.vendType .. "]")
+    LogToConsole("`9Resolved Item: `w" .. tostring(nearest.itemName) .. " `7(ID: `#" .. tostring(nearest.itemId) .. ")")
+    LogToConsole("`9Resolved Price: `e" .. tostring(nearest.priceStr) .. " `7(raw: `#" .. tostring(nearest.price) .. ")")
+    LogToConsole("`9Resolved Stock: `2" .. tostring(nearest.stock) .. " `7- `9OutOfOrder: `#" .. tostring(nearest.isOutOfOrder))
+    if nearest.extra then
+        LogToConsole("`7[TileExtra] type=" .. tostring(nearest.extra.type) .. " alttype=" .. tostring(nearest.extra.alttype) .. " growth=" .. tostring(nearest.extra.growth))
+        LogToConsole("`7[TileExtra] fruitcount=" .. tostring(nearest.extra.fruitcount) .. " volume=" .. tostring(nearest.extra.volume) .. " lastupdate=" .. tostring(nearest.extra.lastupdate))
+        LogToConsole("`7[TileExtra] label='" .. tostring(nearest.extra.label) .. "' label2='" .. tostring(nearest.extra.label2) .. "' label3='" .. tostring(nearest.extra.label3) .. "'")
+        LogToConsole("`7[TileExtra] owner=" .. tostring(nearest.extra.owner) .. " flags=" .. tostring(nearest.extra.flags) .. " progress=" .. tostring(nearest.extra.progress))
+    else
+        LogToConsole("`7[TileExtra] nil (No extra data)")
+    end
+    LogToConsole("`b[`cBen `#x `9Rich `6DEBUG`b] `2Total Vends Scanned in World: `e" .. #allVends)
+    LogToConsole("`b[`cBen `#x `9Rich `6DEBUG`b] `2======================================================")
+    TextOverlay("`2[DEBUG] Dumped nearest vend (" .. nearest.x .. ", " .. nearest.y .. ") to chat!")
+end
+
+function ShowVendScannerMenu()
+    if GetWorld() == nil then
+        TextOverlay("`4[VEND SCAN] You must be in a world!")
+        LogToConsole("`b[`cBen `#x `9Rich `2VEND`b] `4You must be in a world to scan.")
+        return
+    end
+
+    local world = GetCurrentWorldName()
+    local allVends = FindAllVendingMachinesInWorld()
+    local countTotal = #allVends
+    local countClassic = 0
+    local countDigi = 0
+    for _, v in ipairs(allVends) do
+        if v.fg == 9268 then
+            countDigi = countDigi + 1
+        else
+            countClassic = countClassic + 1
+        end
+    end
+
+    local d = {}
+    table.insert(d, "set_default_color|`w")
+    table.insert(d, "add_quick_exit|")
+    table.insert(d, "add_label_with_icon|big|`cBen `#x `9Rich `2World Vend Scanner|left|2978|")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "add_textbox|`9World: `2" .. tostring(world) .. "  `7-  `9Total Vends: `e" .. countTotal .. " `7(`2" .. countClassic .. " `wVend, `e" .. countDigi .. " `wDigi`7)|")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "add_label_with_icon|small|`9Search Vending Machine Items|left|1422|")
+    table.insert(d, "add_text_input|vend_search_query|Item Name or ID: |" .. tostring(vendScanLastQuery or "") .. "|30|")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "add_smalltext|`7Type an item name (e.g. `2balloon`7, `2seed`7, `2mag`7) or leave blank to scan all.`0|")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "text_scaling_string|jjjjjjjjjjjjjjjjjjjjjjjjjj|")
+    table.insert(d, "add_button_with_icon|btn_vend_do_search|`2Search|staticGreenFrame|2978||")
+    table.insert(d, "add_button_with_icon|btn_vend_scan_all|`eScan All|staticYellowFrame|9268||")
+    table.insert(d, "add_button_with_icon|btn_vend_refresh|`9Refresh|staticBlueFrame|758||")
+    table.insert(d, "add_button_with_icon|lonkback|`6Proxy|staticYellowFrame|1436||")
+    table.insert(d, "add_button_with_icon||END_LIST|noflags|0||")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "end_dialog|vend_scanner_menu|Close|Search|")
+
+    SendVariantList({
+        [0] = "OnDialogRequest",
+        [1] = table.concat(d, "\n")
+    })
+end
+
+function ShowVendScanResultDialog()
+    if GetWorld() == nil then return end
+    local world = GetCurrentWorldName()
+    local results = vendScanLastResults or {}
+    local query = vendScanLastQuery or ""
+    local queryDisplay = (query == "" or query == "all" or query == "*") and "All Vends" or query
+
+    local totalResults = #results
+    local perPage = VEND_SCAN_PER_PAGE or 10
+    local totalPages = math.max(1, math.ceil(totalResults / perPage))
+    if vendScanPage < 1 then vendScanPage = 1 end
+    if vendScanPage > totalPages then vendScanPage = totalPages end
+
+    local startIndex = (vendScanPage - 1) * perPage + 1
+    local endIndex = math.min(totalResults, startIndex + perPage - 1)
+
+    local d = {}
+    table.insert(d, "set_default_color|`w")
+    table.insert(d, "add_quick_exit|")
+    table.insert(d, "add_label_with_icon|big|`cBen `#x `9Rich `2Vend Results: `#" .. queryDisplay .. "|left|2978|")
+    table.insert(d, "add_spacer|small|")
+    table.insert(d, "add_textbox|`9World: `2" .. tostring(world) .. "  `7-  `9Matches: `e" .. totalResults .. "  `7-  `9Page: `2" .. vendScanPage .. "`7/`2" .. totalPages .. "|")
+    table.insert(d, "add_spacer|small|")
+
+    if totalResults == 0 then
+        table.insert(d, "add_textbox|`4No vending machines found matching `#'" .. queryDisplay .. "'`4 in this world!|")
+        table.insert(d, "add_smalltext|`7Make sure the item is currently stocked in a Vending or DigiVend Machine.`0|")
+    else
+        for i = startIndex, endIndex do
+            local item = results[i]
+            local iconId = (item.itemId and item.itemId > 0) and item.itemId or item.fg
             local badge = item.isOutOfOrder and "`4[OUT OF ORDER]" or ("`e[" .. tostring(item.priceStr) .. "]")
-            local stockText = item.isOutOfOrder and "" or (" `7(x`2" .. tostring(item.stock) .. "`7)")
-            local label = badge .. " `w" .. tostring(item.itemName) .. stockText
-            table.insert(d, "add_button_with_icon|tp_vend_" .. item.x .. "_" .. item.y .. "|" .. label .. "|noflags|" .. tostring(iconId) .. "||")
+            local stockText = item.isOutOfOrder and "" or (" `2[" .. tostring(item.stock > 0 and (item.stock .. " Stock") or "In Stock") .. "]")
+            table.insert(d, "add_label_with_icon|small|`w" .. tostring(item.itemName) .. stockText .. " " .. badge .. "|left|" .. tostring(iconId) .. "|")
+            table.insert(d, "add_textbox|`9Pos: `2(" .. item.x .. ", " .. item.y .. ")  `7-  `9Type: `#" .. tostring(item.vendType) .. (item.itemId > 0 and ("  `7-  `9ID: `#" .. item.itemId) or "") .. "|")
+            table.insert(d, "add_button|tp_vend_" .. item.x .. "_" .. item.y .. "|`2[ >> Safe TP to (" .. item.x .. ", " .. item.y .. ") << ]`|noflags|0|0|")
+            table.insert(d, "add_spacer|small|")
         end
     end
 
@@ -13585,7 +14107,6 @@ end
 
 SendPacket(2, "action|input\n|text|`4[`4Inject Proxy `wBy `#Ben `cx `2Rich`4]")
 SendVariantList({[0] = "OnDialogRequest", [1] = opening })
-
 
 
 
