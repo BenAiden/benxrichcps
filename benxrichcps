@@ -9339,9 +9339,10 @@ function ShowVendScanResultDialog()
             local item = results[i]
             local iconId = (item.itemId and item.itemId > 0) and item.itemId or item.fg
             local badge = item.isOutOfOrder and "`4[OUT OF ORDER]" or ("`e[" .. tostring(item.priceStr) .. "]")
-            local stockText = item.isOutOfOrder and "" or (" `7(x`2" .. tostring(item.stock) .. "`7)")
-            local label = badge .. " `w" .. tostring(item.itemName) .. stockText
-            table.insert(d, "add_button_with_icon|tp_vend_" .. item.x .. "_" .. item.y .. "|" .. label .. "|noflags|" .. tostring(iconId) .. "||")
+            local stockText = item.isOutOfOrder and "" or (" `2[" .. tostring(item.stock > 0 and (item.stock .. " Stock") or "In Stock") .. "]")
+            table.insert(d, "add_label_with_icon|small|`w" .. tostring(item.itemName) .. stockText .. " " .. badge .. "|left|" .. tostring(iconId) .. "|")
+            local btnInfo = "`9Pos: `2(" .. item.x .. ", " .. item.y .. ") `7| `9Type: `#" .. tostring(item.vendType) .. " `7| `2[ >> Safe TP << ]`"
+            table.insert(d, "add_button|tp_vend_" .. item.x .. "_" .. item.y .. "|" .. btnInfo .. "|noflags|0|0|")
         end
     end
 
