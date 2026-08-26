@@ -9197,6 +9197,19 @@ function SearchVendingMachines(query)
         end
     end
 
+    table.sort(matches, function(a, b)
+        if a.isOutOfOrder and not b.isOutOfOrder then return false end
+        if not a.isOutOfOrder and b.isOutOfOrder then return true end
+        
+        local aPrice = (a.price > 0) and a.price or 999999999
+        local bPrice = (b.price > 0) and b.price or 999999999
+        if aPrice ~= bPrice then return aPrice < bPrice end
+        
+        if a.stock ~= b.stock then return a.stock > b.stock end
+        if a.y ~= b.y then return a.y < b.y end
+        return a.x < b.x
+    end)
+
     vendScanLastResults = matches
     vendScanLastQuery = query
     vendScanPage = 1
@@ -9326,11 +9339,9 @@ function ShowVendScanResultDialog()
             local item = results[i]
             local iconId = (item.itemId and item.itemId > 0) and item.itemId or item.fg
             local badge = item.isOutOfOrder and "`4[OUT OF ORDER]" or ("`e[" .. tostring(item.priceStr) .. "]")
-            local stockText = item.isOutOfOrder and "" or (" `2[" .. tostring(item.stock > 0 and (item.stock .. " Stock") or "In Stock") .. "]")
-            table.insert(d, "add_label_with_icon|small|`w" .. tostring(item.itemName) .. stockText .. " " .. badge .. "|left|" .. tostring(iconId) .. "|")
-            table.insert(d, "add_textbox|`9Pos: `2(" .. item.x .. ", " .. item.y .. ")  `7-  `9Type: `#" .. tostring(item.vendType) .. (item.itemId > 0 and ("  `7-  `9ID: `#" .. item.itemId) or "") .. "|")
-            table.insert(d, "add_button|tp_vend_" .. item.x .. "_" .. item.y .. "|`2[ >> Safe TP to (" .. item.x .. ", " .. item.y .. ") << ]`|noflags|0|0|")
-            table.insert(d, "add_spacer|small|")
+            local stockText = item.isOutOfOrder and "" or (" `7(x`2" .. tostring(item.stock) .. "`7)")
+            local label = badge .. " `w" .. tostring(item.itemName) .. stockText
+            table.insert(d, "add_button_with_icon|tp_vend_" .. item.x .. "_" .. item.y .. "|" .. label .. "|noflags|" .. tostring(iconId) .. "||")
         end
     end
 
@@ -14107,8 +14118,6 @@ end
 
 SendPacket(2, "action|input\n|text|`4[`4Inject Proxy `wBy `#Ben `cx `2Rich`4]")
 SendVariantList({[0] = "OnDialogRequest", [1] = opening })
-
-
 
 
 
